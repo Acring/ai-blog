@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "notion-cli": {
+      "source": "4ier/notion-cli",
+      "sourceType": "github",
+      "computedHash": "10361c3dd900956c91c423917cd5633a9515f960c5bd19f709847929d03d32e0"
+    },
     "remotion-best-practices": {
       "source": "remotion-dev/skills",
       "sourceType": "github",

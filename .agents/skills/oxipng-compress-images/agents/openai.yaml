@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oxipng Compress Images"
+  short_description: "Compress PNG images with oxipng rules"
+  default_prompt: "Use $oxipng-compress-images to shrink PNG files with oxipng, keeping files under 5MB and resizing to 1080px when needed."
