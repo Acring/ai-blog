@@ -8,7 +8,7 @@ description: |
 
 ## page id
 
-日常笔记: 090dcff64bb749959abb1a0a1c7aa165
+日常笔记（数据库）: 090dcff64bb749959abb1a0a1c7aa165
 
 # Notion CLI
 
