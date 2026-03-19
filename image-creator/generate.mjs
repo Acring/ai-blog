@@ -1,14 +1,24 @@
-import 'dotenv/config';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 
-const API_BASE = 'https://toapis.com';
-const API_KEY = process.env.TOAPIS_KEY;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '.env') });
+
+const API_BASE = process.env.OPENROUTER_API_URL ?? 'https://openrouter.ai/api/v1';
+const API_KEY = process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY_FANSTAG;
+const SITE_URL = process.env.OPENROUTER_SITE_URL;
+const APP_TITLE = 'BeeTag AI';
+const MODEL = 'google/gemini-3-pro-image-preview';
 
 if (!API_KEY) {
-  console.error('请在 .env 文件中设置 TOAPIS_KEY');
+  console.error('请在 image-creator/.env 中设置 OPENROUTER_API_KEY');
   process.exit(1);
 }
 
-// 从命令行参数获取 prompt 和可选的 image_urls
 const prompt = process.argv[2];
 const imageUrls = process.argv.slice(3);
 
@@ -17,68 +27,196 @@ if (!prompt) {
   process.exit(1);
 }
 
-async function createImage(prompt, imageUrls = []) {
-  const body = {
-    model: 'gemini-3.1-flash-image-preview',
-    prompt,
-    size: '1:1',
-    n: 1,
-    metadata: { resolution: '2K' },
+function buildRequestBody(userPrompt, inputImageUrls = []) {
+  const content = inputImageUrls.map((url) => ({
+    type: 'image_url',
+    image_url: { url },
+  }));
+
+  content.push({
+    type: 'text',
+    text: userPrompt,
+  });
+
+  return {
+    model: MODEL,
+    messages: [
+      {
+        role: 'user',
+        content,
+      },
+    ],
+    modalities: ['image', 'text'],
+  };
+}
+
+async function createImage(userPrompt, inputImageUrls = []) {
+  const headers = {
+    Authorization: `Bearer ${API_KEY}`,
+    'Content-Type': 'application/json',
+    'X-Title': APP_TITLE,
   };
 
-  if (imageUrls.length > 0) {
-    body.image_urls = imageUrls;
+  if (SITE_URL) {
+    headers['HTTP-Referer'] = SITE_URL;
   }
 
-  const response = await fetch(`${API_BASE}/v1/images/generations`, {
+  const response = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
+    headers,
+    body: JSON.stringify(buildRequestBody(userPrompt, inputImageUrls)),
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`创建任务失败 (${response.status}): ${text}`);
+    throw new Error(`图片生成失败 (${response.status}): ${text}`);
   }
 
   return response.json();
 }
 
-async function getImageStatus(taskId) {
-  const response = await fetch(`${API_BASE}/v1/images/generations/${taskId}`, {
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-    },
-  });
-  return response.json();
+function extractMarkdownImageUrls(text) {
+  const matches = text.matchAll(/!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/g);
+  return Array.from(matches, ([, url]) => ({
+    kind: 'url',
+    url,
+  }));
 }
 
-async function waitForImage(taskId, maxAttempts = 60, interval = 3000) {
-  for (let i = 0; i < maxAttempts; i++) {
-    const result = await getImageStatus(taskId);
-    const status = result.status;
+function parseDataUrl(url) {
+  if (typeof url !== 'string') {
+    return null;
+  }
 
-    console.log(`[${i + 1}/${maxAttempts}] 状态: ${status}`);
+  const match = url.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
 
-    if (status === 'completed') {
-      return result;
-    } else if (status === 'failed') {
-      throw new Error(`任务失败: ${JSON.stringify(result)}`);
+  if (!match) {
+    return null;
+  }
+
+  const [, mediaType, data] = match;
+  return {
+    kind: 'base64',
+    mediaType,
+    data,
+  };
+}
+
+function normalizeImageUrl(url) {
+  return parseDataUrl(url) ?? {
+    kind: 'url',
+    url,
+  };
+}
+
+function normalizeContentArray(content) {
+  if (Array.isArray(content)) {
+    return content;
+  }
+
+  if (typeof content === 'string') {
+    return extractMarkdownImageUrls(content);
+  }
+
+  return [];
+}
+
+function extractImagesFromPart(part) {
+  if (!part || typeof part !== 'object') {
+    return [];
+  }
+
+  if (part.kind === 'url' && typeof part.url === 'string') {
+    return [normalizeImageUrl(part.url)];
+  }
+
+  if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
+    return [normalizeImageUrl(part.image_url.url)];
+  }
+
+  if (part.type === 'image' && typeof part.source?.data === 'string') {
+    return [
+      {
+        kind: 'base64',
+        mediaType: part.source.media_type ?? 'image/png',
+        data: part.source.data,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function extractGeneratedImages(payload) {
+  const messages = (payload?.choices ?? [])
+    .map((choice) => choice?.message)
+    .filter(Boolean);
+
+  const results = [];
+
+  for (const message of messages) {
+    if (Array.isArray(message.images)) {
+      for (const image of message.images) {
+        results.push(...extractImagesFromPart(image));
+      }
     }
 
-    await new Promise((r) => setTimeout(r, interval));
+    for (const part of normalizeContentArray(message.content)) {
+      results.push(...extractImagesFromPart(part));
+    }
   }
 
-  throw new Error('任务超时');
+  return results;
 }
 
-// 主流程
-const task = await createImage(prompt, imageUrls);
-console.log(`任务 ID: ${task.id}`);
-console.log(`初始状态: ${task.status}`);
+function extensionFromMediaType(mediaType) {
+  switch (mediaType) {
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/webp':
+      return 'webp';
+    case 'image/gif':
+      return 'gif';
+    default:
+      return 'png';
+  }
+}
 
-const result = await waitForImage(task.id);
-console.log('图片 URL:', result.result?.data?.[0]?.url ?? result.url);
+async function saveBase64Image(image, index) {
+  const outputDir = path.join(__dirname, 'output');
+  const extension = extensionFromMediaType(image.mediaType);
+  const filename = `generated-${Date.now()}-${index + 1}.${extension}`;
+  const outputPath = path.join(outputDir, filename);
+
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(outputPath, Buffer.from(image.data, 'base64'));
+
+  return outputPath;
+}
+
+async function printResults(images) {
+  if (images.length === 0) {
+    throw new Error('OpenRouter 已返回成功响应，但未找到可用图片结果');
+  }
+
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index];
+
+    if (image.kind === 'url') {
+      console.log(`图片 ${index + 1} URL: ${image.url}`);
+      continue;
+    }
+
+    const savedPath = await saveBase64Image(image, index);
+    console.log(`图片 ${index + 1} 已保存: ${savedPath}`);
+  }
+}
+
+try {
+  const payload = await createImage(prompt, imageUrls);
+  const images = extractGeneratedImages(payload);
+  await printResults(images);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}

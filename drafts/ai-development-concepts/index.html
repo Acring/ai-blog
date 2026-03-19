@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 开发概念「从夯到拉」排名表</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 28px;
+    margin-bottom: 8px;
+    background: linear-gradient(90deg, #e74c3c, #f39c12, #2ecc71);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle {
+    text-align: center;
+    color: #666;
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+  .layout {
+    display: flex;
+    gap: 28px;
+    max-width: 1100px;
+    margin: 0 auto;
+    align-items: flex-start;
+  }
+  /* ---- 排名表 ---- */
+  .tier-table { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .tier-row {
+    display: flex;
+    min-height: 74px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #16213e;
+  }
+  .tier-label {
+    width: 80px; min-width: 80px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 22px;
+    color: #000;
+    text-shadow: 0 1px 2px rgba(255,255,255,.25);
+    user-select: none;
+    letter-spacing: 2px;
+  }
+  .tier-zone {
+    flex: 1;
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    min-height: 74px;
+    transition: background .15s;
+    border-left: 2px solid rgba(0,0,0,.15);
+  }
+  .tier-zone.drag-over { background: rgba(255,255,255,.07); }
+  /* ---- 概念池 ---- */
+  .pool {
+    flex: 0 0 200px;
+    background: #16213e;
+    border-radius: 12px;
+    padding: 16px;
+    position: sticky; top: 20px;
+  }
+  .pool h2 { font-size: 14px; color: #666; text-align: center; margin-bottom: 12px; font-weight: 500; }
+  .pool-zone {
+    display: flex; flex-direction: column; gap: 8px;
+    min-height: 60px;
+    transition: background .15s;
+    border-radius: 8px;
+    padding: 4px;
+  }
+  .pool-zone.drag-over { background: rgba(255,255,255,.05); }
+  /* ---- 概念卡片 ---- */
+  .chip {
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 13px; font-weight: 600;
+    cursor: grab; user-select: none;
+    white-space: nowrap;
+    transition: transform .1s, box-shadow .1s;
+    position: relative;
+    display: inline-block;
+  }
+  .chip:active { cursor: grabbing; }
+  .chip:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+  .chip.dragging { opacity: .35; transform: scale(.95); }
+  /* 卡片配色 — 按参考答案等级着色，和行标签颜色一致 */
+  .chip[data-tier="S"] { background: #e74c3c; color: #fff; }
+  .chip[data-tier="A"] { background: #e67e22; color: #fff; }
+  .chip[data-tier="B"] { background: #f1c40f; color: #000; }
+  .chip[data-tier="C"] { background: #2ecc71; color: #000; }
+  .chip[data-tier="D"] { background: #95a5a6; color: #000; }
+  .chip[data-tier="F"] { background: #7f8c8d; color: #fff; }
+  /* ---- 操作按钮 ---- */
+  .actions { text-align: center; margin-top: 20px; }
+  .actions button {
+    background: #2d3a5a; border: none; color: #aaa; padding: 8px 18px;
+    border-radius: 6px; cursor: pointer; font-size: 13px; margin: 0 6px;
+    transition: background .15s, color .15s;
+  }
+  .actions button:hover { background: #3d4f7a; color: #fff; }
+  /* ---- tooltip ---- */
+  .chip[data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%; transform: translateX(-50%);
+    background: #0f0f23; color: #ccc;
+    padding: 6px 10px; border-radius: 6px;
+    font-size: 12px; font-weight: 400;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+
+<h1>AI 开发概念「从夯到拉」排名表</h1>
+<p class="subtitle">把概念从右侧池子拖到对应的等级行 — 也可以在行之间互相拖动</p>
+
+<div class="layout">
+  <div class="tier-table" id="tierTable"></div>
+  <div class="pool" id="pool">
+    <h2>概念池</h2>
+    <div class="pool-zone" id="poolZone"></div>
+  </div>
+</div>
+
+<div class="actions">
+  <button id="btnReset">重置</button>
+  <button id="btnAnswer">查看参考答案</button>
+</div>
+
+<script>
+/* =========================================================
+   数据
+   ========================================================= */
+const TIERS = [
+  { id: 'S',  label: '夯中夯', color: '#e74c3c' },
+  { id: 'A',  label: '夯',    color: '#e67e22' },
+  { id: 'B',  label: '顶级',  color: '#f1c40f' },
+  { id: 'C',  label: '人上人', color: '#2ecc71' },
+  { id: 'D',  label: 'NPC',   color: '#95a5a6' },
+  { id: 'F',  label: '拉完了', color: '#7f8c8d' },
+];
+
+// cat: core / context / tool / agent / ext / meta
+const CONCEPTS = [
+  { id: 'llm',          name: '大模型 LLM',      cat: 'core',    tip: '一切 AI 技术的起点',            answer: 'S' },
+  { id: 'api',          name: '大模型 API',       cat: 'core',    tip: '调用大模型进行推理',            answer: 'S' },
+  { id: 'conversation', name: '对话',             cat: 'context', tip: '多轮请求-响应的上下文交互',       answer: 'A' },
+  { id: 'memory',       name: 'Memory',           cat: 'context', tip: 'AI 记住跨会话信息',             answer: 'B' },
+  { id: 'function_call',name: 'Function Call',     cat: 'tool',    tip: 'AI 按规范返回工具调用结构',      answer: 'S' },
+  { id: 'agent',        name: 'Agent',             cat: 'agent',   tip: '对话 + 规划 + 工具 + 总结',      answer: 'A' },
+  { id: 'rule',         name: 'Rule',              cat: 'ext',     tip: 'Agent 遵循的规范文件',           answer: 'B' },
+  { id: 'commands',     name: 'Commands',          cat: 'ext',     tip: 'Agent 预制命令提示词',           answer: 'D' },
+  { id: 'mcp',          name: 'MCP',               cat: 'tool',    tip: 'AI 世界的 USB 接口协议',        answer: 'B' },
+  { id: 'skills',       name: 'Skills',            cat: 'ext',     tip: '指令+脚本+资源的复用文件夹',      answer: 'A' },
+  { id: 'subagent',     name: 'Subagent',          cat: 'agent',   tip: '主 Agent 派生的子任务执行者',     answer: 'C' },
+  { id: 'agent_team',   name: 'Agent Team',        cat: 'agent',   tip: '多 Agent 并行协作团队',          answer: 'D' },
+  { id: 'hooks',        name: 'Hooks',             cat: 'meta',    tip: '精准控制 Agent 阶段行为',        answer: 'D' },
+  { id: 'plugins',      name: 'Plugins',           cat: 'meta',    tip: '将多个概念打包复用',             answer: 'D' },
+  { id: 'workflow',     name: 'Workflow',          cat: 'ext',     tip: 'Agent 编排多步骤任务流程',       answer: 'A' },
+];
+
+/* =========================================================
+   渲染
+   ========================================================= */
+const tierTable = document.getElementById('tierTable');
+const poolZone  = document.getElementById('poolZone');
+
+function buildTable() {
+  tierTable.innerHTML = '';
+  TIERS.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'tier-row';
+    row.innerHTML = `
+      <div class="tier-label" style="background:${t.color}">${t.label}</div>
+      <div class="tier-zone" data-tier="${t.id}"></div>`;
+    tierTable.appendChild(row);
+  });
+}
+
+function createChip(c) {
+  const el = document.createElement('div');
+  el.className = 'chip';
+  el.draggable = true;
+  el.dataset.id   = c.id;
+  el.dataset.tier  = c.answer;
+  el.dataset.tip  = c.tip;
+  el.textContent = c.name;
+  return el;
+}
+
+function resetAll() {
+  document.querySelectorAll('.chip').forEach(el => el.remove());
+  // 随机顺序放入池
+  const shuffled = [...CONCEPTS].sort(() => Math.random() - .5);
+  shuffled.forEach(c => poolZone.appendChild(createChip(c)));
+}
+
+function showAnswer() {
+  document.querySelectorAll('.chip').forEach(el => el.remove());
+  CONCEPTS.forEach(c => {
+    const zone = document.querySelector(`.tier-zone[data-tier="${c.answer}"]`);
+    if (zone) zone.appendChild(createChip(c));
+  });
+}
+
+buildTable();
+resetAll();
+
+document.getElementById('btnReset').addEventListener('click', resetAll);
+document.getElementById('btnAnswer').addEventListener('click', showAnswer);
+
+/* =========================================================
+   拖拽 — HTML5 Drag & Drop
+   ========================================================= */
+let draggedEl = null;
+
+document.addEventListener('dragstart', e => {
+  if (!e.target.classList.contains('chip')) return;
+  draggedEl = e.target;
+  draggedEl.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+});
+
+document.addEventListener('dragend', () => {
+  if (draggedEl) draggedEl.classList.remove('dragging');
+  draggedEl = null;
+  document.querySelectorAll('.drag-over').forEach(z => z.classList.remove('drag-over'));
+});
+
+function getDropZone(el) {
+  return el && (el.classList.contains('tier-zone') || el.classList.contains('pool-zone'))
+    ? el : el?.closest('.tier-zone, .pool-zone');
+}
+
+document.addEventListener('dragover', e => {
+  const zone = getDropZone(e.target);
+  if (!zone) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.drag-over').forEach(z => z.classList.remove('drag-over'));
+  zone.classList.add('drag-over');
+});
+
+document.addEventListener('dragleave', e => {
+  const zone = getDropZone(e.target);
+  if (zone) zone.classList.remove('drag-over');
+});
+
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  const zone = getDropZone(e.target);
+  if (!zone || !draggedEl) return;
+  zone.classList.remove('drag-over');
+  zone.appendChild(draggedEl);
+});
+
+/* =========================================================
+   移动端触摸拖拽
+   ========================================================= */
+let touchClone = null;
+let touchSource = null;
+let offsetX = 0, offsetY = 0;
+
+document.addEventListener('touchstart', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  touchSource = chip;
+  const rect = chip.getBoundingClientRect();
+  offsetX = e.touches[0].clientX - rect.left;
+  offsetY = e.touches[0].clientY - rect.top;
+  // 克隆跟随手指
+  touchClone = chip.cloneNode(true);
+  touchClone.style.position = 'fixed';
+  touchClone.style.zIndex = '9999';
+  touchClone.style.pointerEvents = 'none';
+  touchClone.style.opacity = '.85';
+  touchClone.style.width = rect.width + 'px';
+  document.body.appendChild(touchClone);
+  chip.classList.add('dragging');
+}, { passive: true });
+
+document.addEventListener('touchmove', e => {
+  if (!touchClone) return;
+  e.preventDefault();
+  const x = e.touches[0].clientX - offsetX;
+  const y = e.touches[0].clientY - offsetY;
+  touchClone.style.left = x + 'px';
+  touchClone.style.top  = y + 'px';
+  // 高亮目标
+  document.querySelectorAll('.drag-over').forEach(z => z.classList.remove('drag-over'));
+  const under = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+  const zone = getDropZone(under);
+  if (zone) zone.classList.add('drag-over');
+}, { passive: false });
+
+document.addEventListener('touchend', e => {
+  if (!touchClone || !touchSource) return;
+  touchClone.remove();
+  touchSource.classList.remove('dragging');
+  document.querySelectorAll('.drag-over').forEach(z => z.classList.remove('drag-over'));
+  const touch = e.changedTouches[0];
+  const under = document.elementFromPoint(touch.clientX, touch.clientY);
+  const zone = getDropZone(under);
+  if (zone) zone.appendChild(touchSource);
+  touchClone = null;
+  touchSource = null;
+});
+</script>
+</body>
+</html>
