@@ -75,6 +75,8 @@ def parse_markdown(md_path):
 
 def append_text(page_id, text):
     """Append a text chunk (markdown) to the page via notion block append --file."""
+    # Notion expects fenced code blocks tagged as "plain text", not "text".
+    text = re.sub(r"(?m)^```text(\s*)$", r"```plain text\1", text)
     with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
         f.write(text)
         tmp_path = f.name
